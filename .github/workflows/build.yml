@@ -1,0 +1,91 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          java-version: '25'
+          distribution: temurin
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - name: Check index publisher
+        run: |
+          python -m pip install protobuf==7.35.1
+          python -m unittest discover -s scripts -p 'test_*.py'
+      - run: ./gradlew :src:en:asurascans:testDebugUnitTest :src:en:asurascans:lintRelease :src:en:asurascans:assembleRelease
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: asurascans-test-build
+          path: |
+            src/en/asurascans/build/outputs/apk/release/*.apk
+            src/en/asurascans/build/outputs/jar/release/*.jar
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      ALIAS: ${{ secrets.ALIAS }}
+      KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          java-version: '25'
+          distribution: temurin
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - name: Prepare signing key
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          test -n "$SIGNING_KEY" && test -n "$ALIAS" && test -n "$KEY_STORE_PASSWORD" && test -n "$KEY_PASSWORD"
+          printf '%s' "$SIGNING_KEY" | base64 -d > signingkey.jks
+          keytool -exportcert -keystore signingkey.jks -alias "$ALIAS" -storepass:env KEY_STORE_PASSWORD -file /tmp/certificate.der
+      - run: ./gradlew :src:en:asurascans:assembleRelease
+      - name: Build repository index
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TAG: build-${{ github.sha }}
+        run: |
+          python -m pip install protobuf==7.35.1
+          python scripts/build-index.py --repository "$REPOSITORY" --tag "$TAG" --certificate /tmp/certificate.der
+      - name: Publish extension and index
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: build-${{ github.sha }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          gh release create "$TAG" dist/* --repo "$REPOSITORY" --target "$COMMIT" --title "Asura Scans" --notes "Native Kotlin novel extension with WebView session support." --latest
+      - name: Remove signing files
+        if: always()
+        run: rm -f signingkey.jks /tmp/certificate.der
