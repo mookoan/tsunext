@@ -25,17 +25,25 @@ APKs and JARs are written under `src/en/asurascans/build/outputs/`. Local builds
 
 ## GitHub releases
 
-The workflow checks builds on pull requests and pushes. To publish signed extensions, add these repository Actions secrets: `SIGNING_KEY` (base64-encoded JKS), `KEY_STORE_PASSWORD`, `ALIAS`, and `KEY_PASSWORD`. Keep the same signing key for future updates.
+The workflow checks builds on pull requests and pushes. The **Publish release** option creates a signed APK/JAR and Tsundoku repository index. To initialize release publishing, install `gh` and a JDK (`keytool`), authenticate GitHub CLI as **mookoan**, and run:
 
 ```sh
-keytool -genkeypair -keystore signingkey.jks -alias extensions -keyalg RSA -keysize 4096 -validity 10000
-base64 -w0 signingkey.jks
+gh auth login
+bash scripts/setup-publishing.sh
 ```
 
-Run the **Build** workflow manually with **Publish release** selected. Its release contains the extension APK/JAR and a Tsundoku repository index. Add this URL in Tsundoku, substituting your GitHub owner and repository:
+The script generates a signing keystore at `~/.local/share/tsunext/signingkey.jks` if none exists, configures the repository Actions secrets (`SIGNING_KEY`, `KEY_STORE_PASSWORD`, `ALIAS`, `KEY_PASSWORD`), and dispatches the publish workflow. It refuses to silently replace an existing GitHub signing secret if the local keystore is missing. **Back up the keystore and its password securely:** future extension updates must use the same certificate. Never commit the keystore, password, or repository secrets.
+
+For subsequent releases, increase `keiyoushi.versionCode` in `src/en/asurascans/build.gradle.kts` and run:
+
+```sh
+gh workflow run build.yml --repo mookoan/tsunext --ref main -f publish=true
+```
+
+Or run the **Build** workflow manually with **Publish release** selected. The repository URL to add in Tsundoku is:
 
 ```text
-https://github.com/OWNER/REPOSITORY/releases/latest/download/index.pb
+https://github.com/mookoan/tsunext/releases/latest/download/index.pb
 ```
 
 The GitHub repository must be public for Tsundoku to download its release assets without GitHub authentication.

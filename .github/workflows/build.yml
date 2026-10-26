@@ -67,8 +67,15 @@ jobs:
         env:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
         run: |
-          test -n "$SIGNING_KEY" && test -n "$ALIAS" && test -n "$KEY_STORE_PASSWORD" && test -n "$KEY_PASSWORD"
-          printf '%s' "$SIGNING_KEY" | base64 -d > signingkey.jks
+          if [[ -z "$SIGNING_KEY" || -z "$ALIAS" || -z "$KEY_STORE_PASSWORD" || -z "$KEY_PASSWORD" ]]; then
+            echo "::error::Missing release signing secrets. Run bash scripts/setup-publishing.sh locally with gh logged in as mookoan."
+            exit 1
+          fi
+          printf '%s' "$SIGNING_KEY" | base64 --decode > signingkey.jks
+          if [[ ! -s signingkey.jks ]]; then
+            echo "::error::Decoded signing keystore is empty."
+            exit 1
+          fi
           keytool -exportcert -keystore signingkey.jks -alias "$ALIAS" -storepass:env KEY_STORE_PASSWORD -file /tmp/certificate.der
       - run: ./gradlew :src:en:asurascans:assembleRelease
       - name: Build repository index
